@@ -1,18 +1,72 @@
+import rllib
 
 from typing import List
 
 import torch
 import torch.nn as nn
 from torch.nn import functional as F
+from torch.optim import Adam
 
 
-class VanillaVAE(nn.Module):
+
+class VanillaVAE(rllib.template.MethodSingleAgent):
+    lr_model = 0.0003
+
+    buffer_size = 10000
+    batch_size = 144
+    weight = batch_size / buffer_size
+
+    start_timesteps = 30000
+    
+    save_model_interval = 200
+
+    def __init__(self, config: rllib.basic.YamlConfig, writer: rllib.basic.Writer):
+        '''
+        '''
+
+        super().__init__(config, writer)
+
+        self.model = Model(3, 16)
+
+        self.optimizer = Adam(self.model.parameters(), lr=self.lr_model)
+        self.model_loss = nn.MSELoss()
+        self._memory = config.get('buffer', rllib.td3.ReplayBuffer)(self.buffer_size, self.batch_size, self.device)
+        return
+
+
+    def update_parameters(self):
+        if len(self._memory) < self.start_timesteps:
+            return
+        super().update_parameters()
+
+        '''load data batch'''
+        experience = self._memory.sample()
+        input: torch.Tensor = experience.input
+
+        output, mu, logstd = self.model(input)
+        recons_loss = self.model_loss(output, input.detach())
+        kl_loss = torch.mean(-0.5 * torch.sum(1 + logstd - mu ** 2 - logstd.exp(), dim=1), dim=0)
+        loss = recons_loss + self.weight * kl_loss
+
+        self.optimizer.zero_grad()
+        loss.backward()
+        self.optimizer.step()
+
+        self.writer.add_scalar('loss/loss', loss.detach().item(), self.step_update)
+        self.writer.add_scalar('loss/recons_loss', recons_loss.detach().item(), self.step_update)
+        self.writer.add_scalar('loss/kl_loss', kl_loss.detach().item(), self.step_update)
+
+        if self.step_update % self.save_model_interval == 0: self._save_model()
+        return
+
+
+class Model(nn.Module):
     def __init__(self,
                  in_channels: int,
                  latent_dim: int,
                  hidden_dims: List = None,
                  **kwargs) -> None:
-        super(VanillaVAE, self).__init__()
+        super(Model, self).__init__()
 
         self.latent_dim = latent_dim
 
@@ -120,6 +174,13 @@ class VanillaVAE(nn.Module):
         z = self.reparameterize(mu, log_var)
         return  [self.decode(z), input, mu, log_var]
 
+
+    def forward(self, input: torch.Tensor):
+        mu, logstd = self.encode(input)
+        z = self.reparameterize(mu, logstd)
+        output = self.decode(z)
+        return output, mu, logstd
+
     def loss_function(self,
                       *args,
                       **kwargs) -> dict:
@@ -170,4 +231,33 @@ class VanillaVAE(nn.Module):
         """
 
         return self.forward(x)[0]
+
+
+
+
+class ReplayBuffer(rllib.buffer.ReplayBuffer):
+    def _batch_stack(self, batch):
+
+        import pdb; pdb.set_trace()
+        print('buffer !!!')
+
+        state, action, next_state, reward, done = [], [], [], [], []
+        for e in batch:
+            state.append(e.state)
+            action.append(e.action)
+            next_state.append(e.next_state)
+            reward.append(e.reward)
+            done.append(e.done)
+
+        state = torch.cat(state, dim=0)
+        action = torch.cat(action, dim=0)
+        next_state = torch.cat(next_state, dim=0)
+        reward = torch.tensor(reward, dtype=torch.float32).unsqueeze(1)
+        done = torch.tensor(done, dtype=torch.float32).unsqueeze(1)
+
+        experience = rllib.template.Experience(
+            state=state,
+            next_state=next_state,
+            action=action, reward=reward, done=done)
+        return experience
 
