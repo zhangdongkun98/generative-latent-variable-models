@@ -7,7 +7,7 @@ import torch.nn as nn
 from torch.optim import Adam
 
 
-class VanillaVAE(rllib.template.MethodSingleAgent):
+class AutoEncoder(rllib.template.MethodSingleAgent):
     lr_model = 0.0003
 
     buffer_size = 10000
@@ -42,18 +42,14 @@ class VanillaVAE(rllib.template.MethodSingleAgent):
         experience = self._memory.sample()
         input: torch.Tensor = experience.input
 
-        output, mean, logstd = self.model(input)
-        recons_loss = self.model_loss(output, input.detach())
-        kl_loss = torch.mean(-0.5 * torch.sum(1 + logstd - mean ** 2 - logstd.exp(), dim=1), dim=0)
-        loss = recons_loss + self.weight * kl_loss
+        output = self.model(input)
+        loss = self.model_loss(output, input.detach())
 
         self.optimizer.zero_grad()
         loss.backward()
         self.optimizer.step()
 
         self.writer.add_scalar('loss/loss', loss.detach().item(), self.step_update)
-        self.writer.add_scalar('loss/recons_loss', recons_loss.detach().item(), self.step_update)
-        self.writer.add_scalar('loss/kl_loss', kl_loss.detach().item(), self.step_update)
 
         if self.step_update % self.save_model_interval == 0: self._save_model()
         return
@@ -78,9 +74,9 @@ class Model(rllib.template.Model):
             nn.Conv2d(128, 256, kernel_size=3, stride=2, padding=1), nn.BatchNorm2d(256), nn.LeakyReLU(),
             nn.Conv2d(256, 512, kernel_size=3, stride=2, padding=1), nn.BatchNorm2d(512), nn.LeakyReLU(),
         )
-
-        self.mean = nn.Linear(512 *4, config.dim_latent)
-        self.logstd = nn.Linear(512 *4, config.dim_latent)
+        self.encoder_output = nn.Sequential(
+            nn.Linear(512 *4, config.dim_latent), nn.Tanh()
+        )
 
         self.decoder_input = nn.Linear(config.dim_latent, 512 *4)
         self.decoder = nn.Sequential(
@@ -95,37 +91,21 @@ class Model(rllib.template.Model):
 
 
     def forward(self, input: torch.Tensor):
-        mean, logstd = self.encode(input)
-        z = self.reparameterize(mean, logstd)
+        z = self.encode(input)
         output = self.decode(z)
-        return output, mean, logstd
+        return output
 
 
     def encode(self, input: torch.Tensor):
         x = self.encoder(input)
         x = torch.flatten(x, start_dim=1)
-
-        mean, logstd = self.mean(x), self.logstd(x)
-        return mean, logstd
+        return self.encoder_output(x)
 
     def decode(self, z: torch.Tensor):
         x = self.decoder_input(z)
         x = x.view(z.shape[0], 512, 2, 2)
-
         x = self.decoder(x)
         return x
-
-    def reparameterize(self, mean: torch.Tensor, logstd: torch.Tensor):
-        std = torch.exp(0.5 * logstd)
-        eps = torch.randn_like(std)
-        return eps * std + mean
-
-
-    def sample(self, num_samples):
-        z = torch.randn(num_samples, self.dim_latent)
-        z = z.to(self.device)
-        samples = self.decode(z)
-        return samples
 
 
 
