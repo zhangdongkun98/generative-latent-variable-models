@@ -55,6 +55,7 @@ class AutoEncoder(rllib.template.MethodSingleAgent):
         return
 
 
+    @torch.no_grad()
     def select_action(self, _):
         super().select_action()
         action = torch.Tensor(1,self.dim_action).uniform_(-1,1)
