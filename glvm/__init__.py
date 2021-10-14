@@ -5,6 +5,7 @@ from .vanilla_vae import VanillaVAE
 
 from .auto_encoder import AutoEncoder
 
+from .wgan_gp import WGANGP
 
 
 

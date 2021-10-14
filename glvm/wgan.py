@@ -4,33 +4,26 @@ from rllib.template.model import FeatureMapper
 import torch
 import torch.nn as nn
 from torch.optim import RMSprop
-from torch.autograd import grad
 from torch.utils.data import DataLoader
 from torch.utils.data import Dataset
 
 
-# class GradientPaneltyLoss(nn.Module):
-#     def __init__(self):
-#          super(GradientPaneltyLoss, self).__init__()
 
-#     def forward(self, y, x):
-#         """Compute gradient penalty: (L2_norm(dy/dx) - 1)**2."""
-#         weight = torch.ones_like(y)
-#         dydx = torch.autograd.grad(outputs=y,
-#                                    inputs=x,
-#                                    grad_outputs=weight,
-#                                    retain_graph=True,
-#                                    create_graph=True,
-#                                    only_inputs=True)[0]
+def clamp_module(net: nn.Module, w_min, w_max):
+    for module in net.children():
+        clamp_module(module, w_min, w_max)
 
-#         dydx = dydx.view(dydx.size(0), -1)
-#         dydx_l2norm = torch.sqrt(torch.sum(dydx ** 2, dim=1))
-#         return torch.mean((dydx_l2norm - 1) ** 2)
+    # if net.__class__.__name__ == 'Linear':
+    if isinstance(net, nn.Linear):
+        # print('here')
+        net.weight.requires_grad = False
+        net.weight.clamp_(w_min, w_max)
+        net.weight.requires_grad = True
+    return
 
 
 
-
-class WGANGP(rllib.template.Method):
+class WGAN(rllib.template.Method):
     lr_g = 1e-4
     lr_d = 1e-4
     weight_decay = 5e-4
@@ -40,7 +33,7 @@ class WGANGP(rllib.template.Method):
 
     num_workers = 16
 
-    save_model_interval = 2000
+    save_model_interval = 200
 
     def __init__(self, config: rllib.basic.YamlConfig, writer: rllib.basic.Writer):
         '''
@@ -72,16 +65,19 @@ class WGANGP(rllib.template.Method):
 
         data = rllib.basic.Data(**next(self.train_samples)).to(self.device)
 
-        # noise, fake, info = self.forward(data)
-
         '''discriminator'''
         rllib.basic.pytorch.set_requires_grad(self.discriminator, True)
         self.d_optimizer.zero_grad()
-        # d_loss, info = self.calculate_d_loss(data, noise, fake, info)
-        d_loss, info = self.calculate_d_loss(data)   ### v0
+        d_loss, info = self.calculate_d_loss(data)
         d_loss.backward()
-        # torch.nn.utils.clip_grad_value_(self.discriminator.parameters(), clip_value=1)
+        torch.nn.utils.clip_grad_value_(self.discriminator.parameters(), clip_value=1)
         self.d_optimizer.step()
+
+        ### weight Clipping WGAN
+        c = 0.005
+        c = 0.01
+        clamp_module(self.discriminator, -c, c)
+
 
 
 
@@ -90,7 +86,7 @@ class WGANGP(rllib.template.Method):
         self.g_optimizer.zero_grad()
         g_loss = self.calculate_g_loss(data, info)
         g_loss.backward()
-        # torch.nn.utils.clip_grad_value_(self.generator.parameters(), clip_value=1)
+        torch.nn.utils.clip_grad_value_(self.generator.parameters(), clip_value=1)
         self.g_optimizer.step()
 
         self.writer.add_scalar('loss/d_loss', d_loss.detach().item(), self.step_update)
@@ -102,41 +98,11 @@ class WGANGP(rllib.template.Method):
         return
 
 
-    def forward(self, data):
-        return 0.0
-
     def calculate_d_loss(self, data):
         return torch.tensor(0.0)
     
     def calculate_g_loss(self, data):
         return torch.tensor(0.0)
-
-
-    def calculate_gradient_penalty(self, real, fake):
-    
-
-        """Calculates the gradient penalty loss for WGAN GP"""
-        alpha = torch.rand((self.batch_size, 1), device=self.device)
-        # Get random interpolation between real and fake data
-        interpolates = (alpha * real.data + ((1 - alpha) * fake.data)).requires_grad_(True)
-
-        model_interpolates = self.discriminator(interpolates)
-        # grad_outputs = torch.ones(model_interpolates.size(), device=self.device, requires_grad=False)
-        # grad_outputs = torch.ones_like(model_interpolates, requires_grad=False)
-        grad_outputs = torch.ones_like(model_interpolates)
-
-        # Get gradient w.r.t. interpolates
-        gradients = grad(
-            outputs=model_interpolates,
-            inputs=interpolates,
-            grad_outputs=grad_outputs,
-            create_graph=True,
-            retain_graph=True,
-            only_inputs=True,
-        )[0]
-        gradients = gradients.view(gradients.size(0), -1)
-        gradient_penalty = torch.mean((gradients.norm(2, dim=1) - 1) **2)
-        return gradient_penalty
 
 
 
