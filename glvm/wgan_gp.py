@@ -49,7 +49,7 @@ class WganGp(rllib.template.Method):
 
 
     def update_parameters(self):
-        super().update_parameters()
+        self.update_parameters_start()
 
         data = rllib.basic.Data(**next(self.train_samples)).to(self.device)
 

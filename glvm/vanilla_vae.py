@@ -36,7 +36,7 @@ class VanillaVAE(rllib.template.MethodSingleAgent):
     def update_parameters(self):
         if len(self._memory) < self.start_timesteps:
             return
-        super().update_parameters()
+        self.update_parameters_start()
 
         '''load data batch'''
         experience = self._memory.sample()
