@@ -1,6 +1,8 @@
 import rllib
 from rllib.template.model import FeatureMapper
 
+from tqdm import tqdm
+
 import torch
 import torch.nn as nn
 from torch.optim import RMSprop
@@ -39,19 +41,23 @@ class WganGp(rllib.template.Method):
         self.g_optimizer = RMSprop(self.generator.parameters(), lr=self.lr_g, weight_decay=self.weight_decay)
 
         dataset_cls = config.get('dataset_cls', Dataset)
-        # train_dataloader = DataLoader(dataset_cls(config, mode='train'), batch_size=self.batch_size, shuffle=False, num_workers=self.num_workers)
-        train_dataloader = DataLoader(dataset_cls(config, mode='train'), batch_size=self.batch_size, shuffle=False, num_workers=1)
-        # evaluate_dataloader = DataLoader(dataset_cls(config, mode='evaluate'), batch_size=1, shuffle=False, num_workers=1)
-        evaluate_dataloader = DataLoader(dataset_cls(config, mode='evaluate'), batch_size=self.batch_size, shuffle=False, num_workers=1)
-        self.train_samples, self.evaluate_samples = iter(train_dataloader), iter(evaluate_dataloader)
+        self.train_dataloader = DataLoader(dataset_cls(config, mode='train'), batch_size=self.batch_size, shuffle=True, num_workers=1, drop_last=True)
+        self.evaluate_dataloader = DataLoader(dataset_cls(config, mode='evaluate'), batch_size=self.batch_size, shuffle=False, num_workers=1, drop_last=True)
+        # self.train_samples, self.evaluate_samples = iter(self.train_dataloader), iter(self.evaluate_dataloader)
+        return
+
+
+    def update_parameters_(self):
+        self.step_epoch += 1
+        print('\n\nepoch index: ', self.step_epoch)
+        for i, data_samples in tqdm(enumerate(self.train_dataloader)):
+            self.update_parameters(rllib.basic.Data(**data_samples).to(self.device))
         return
 
 
 
-    def update_parameters(self):
+    def update_parameters(self, data):
         self.update_parameters_start()
-
-        data = rllib.basic.Data(**next(self.train_samples)).to(self.device)
 
         # noise, fake, info = self.forward(data)
 
@@ -94,7 +100,10 @@ class WganGp(rllib.template.Method):
 
 
     def calculate_gradient_penalty(self, real, fake):
-        alpha = torch.rand((self.batch_size, 1), device=self.device)
+        alpha_shape = torch.tensor(real.shape)
+        alpha_shape[1:] = 1
+        alpha_shape = list(alpha_shape)
+        alpha = torch.rand(alpha_shape, device=self.device)
         interpolates = (alpha * real.data + ((1 - alpha) * fake.data)).requires_grad_(True)
 
         model_interpolates = self.discriminator(interpolates)
