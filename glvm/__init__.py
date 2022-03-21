@@ -1,6 +1,9 @@
 
 print('This is glvm.')
 
+from . import template
+
+
 from .vanilla_vae import VanillaVAE
 
 from .auto_encoder import AutoEncoder

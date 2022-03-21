@@ -1,18 +1,17 @@
 import rllib
 from rllib.template.model import FeatureMapper
-
-from tqdm import tqdm
+import glvm
 
 import torch
 import torch.nn as nn
 from torch.optim import RMSprop
 from torch.autograd import grad
-from torch.utils.data import DataLoader
 from torch.utils.data import Dataset
+from torch.utils.data import DataLoader
 
 
 
-class WganGp(rllib.template.Method):
+class WganGp(glvm.template.Method):
     lr_g = 1e-4
     lr_d = 1e-4
     weight_decay = 5e-4
@@ -22,6 +21,7 @@ class WganGp(rllib.template.Method):
 
     num_workers = 16
 
+    evaluate_interval = 2
     save_model_interval = 2000
 
     def __init__(self, config: rllib.basic.YamlConfig, writer: rllib.basic.Writer):
@@ -41,19 +41,11 @@ class WganGp(rllib.template.Method):
         self.g_optimizer = RMSprop(self.generator.parameters(), lr=self.lr_g, weight_decay=self.weight_decay)
 
         dataset_cls = config.get('dataset_cls', Dataset)
-        self.train_dataloader = DataLoader(dataset_cls(config, mode='train'), batch_size=self.batch_size, shuffle=True, num_workers=1, drop_last=True)
-        self.evaluate_dataloader = DataLoader(dataset_cls(config, mode='evaluate'), batch_size=self.batch_size, shuffle=False, num_workers=1, drop_last=True)
-        # self.train_samples, self.evaluate_samples = iter(self.train_dataloader), iter(self.evaluate_dataloader)
+        self.train_dataset = dataset_cls(config, mode='train')
+        self.evaluate_dataset = dataset_cls(config, mode='evaluate')
+        self.train_dataloader = DataLoader(self.train_dataset, batch_size=self.batch_size, shuffle=True, num_workers=1, drop_last=True)
+        self.evaluate_dataloader = DataLoader(self.evaluate_dataset, batch_size=self.batch_size, shuffle=True, num_workers=1, drop_last=True)
         return
-
-
-    def update_parameters_(self):
-        self.step_epoch += 1
-        print('\n\nepoch index: ', self.step_epoch)
-        for i, data_samples in tqdm(enumerate(self.train_dataloader)):
-            self.update_parameters(rllib.basic.Data(**data_samples).to(self.device))
-        return
-
 
 
     def update_parameters(self, data):
@@ -87,6 +79,7 @@ class WganGp(rllib.template.Method):
             self._save_model()
         
         return
+
 
 
     def forward(self, data):
