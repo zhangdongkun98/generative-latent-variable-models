@@ -112,23 +112,6 @@ class WganGp(glvm.template.Method):
 
 
 
-class Evaluate(rllib.template.Method):
-    dim_noise = 64
-
-    def __init__(self, config: rllib.basic.YamlConfig, writer: rllib.basic.Writer):
-        super().__init__(config, writer)
-
-        config.set('method_name', 'WganGp'.upper())
-        config.set('dim_noise', self.dim_noise)
-
-        self.discriminator = config.get('net_discriminator', Discriminator)(config).to(self.device)
-        self.generator = config.get('net_generator', Generator)(config).to(self.device)
-        # self.models_to_load = [self.discriminator, self.generator]
-        self.models_to_load = [self.generator]
-        self._load_model()
-        return
-
-
 
 class Generator(rllib.template.Model):
     """

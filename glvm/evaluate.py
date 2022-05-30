@@ -1,5 +1,6 @@
 import rllib
 
+import time
 
 import torch
 
@@ -39,4 +40,34 @@ class Evaluate(rllib.template.MethodSingleAgent):
         action = torch.Tensor(1,self.dim_action).uniform_(-1,1)
         return action
 
+
+
+
+
+class Evaluate(object):
+    method_cls = None
+
+    def __init__(self, config: rllib.basic.YamlConfig, writer: rllib.basic.Writer):
+        method_cls = config.get('method_cls', self.method_cls)
+        self.method = method_cls(config, writer)
+        self.method._load_model()
+
+        for key, value in self.method.__class__.__dict__.items():
+            if not callable(value) and not hasattr(value, '__get__'):
+                setattr(self, key, value)
+        for key, value in self.method.__dict__.items():
+            if not callable(value) and not hasattr(value, '__get__'):
+                setattr(self, key, value)
+        return
+
+
+    def update_parameters_(self):
+        t1 = time.time()
+        for i, data_samples in enumerate(self.evaluate_dataloader):
+            print('    evaluate ratio: {} / {}'.format(i, len(self.evaluate_dataset)/self.batch_size), end='\r', flush=True)
+            with torch.no_grad():
+                self.method.evaluate_parameters(rllib.basic.Data(**data_samples).to(self.device))
+        t2 = time.time()
+        print('\nevaluate one epoch time: ', t2-t1, 's')
+        return
 
